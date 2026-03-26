@@ -499,15 +499,20 @@ jobs:
           if [[ -z "$USER_TIME" ]]; then
             # 留空则动态获取当前的东八区真实时间
             TARGET_TIME="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+             TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
             echo "--- 用户未指定编译时间，已自动获取当前系统真实时间: $TARGET_TIME ---"
           else
             TARGET_TIME="$USER_TIME"
+            TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
             echo "--- 用户指定了自定义编译时间: $TARGET_TIME ---"
           fi
           
           export FAKESTAT="$TARGET_TIME"
           export FAKETIME="@$TARGET_TIME"
           export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
+          # 致命一击：强制覆盖 Linux 内核官方用于记录编译时间的环境变量！
+          export KBUILD_BUILD_TIMESTAMP="$TARGET_TIME"
+          export SOURCE_DATE_EPOCH="$TARGET_UNIX"
           
           # ======================================================
           
