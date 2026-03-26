@@ -489,21 +489,26 @@ jobs:
           echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
           
           cd kernel_workspace/common
+          # ================= 斩草除根：干掉 #1 SMP PREEMPT =================
+          sed -i 's/UTS_VERSION="$UTS_VERSION $CONFIG_FLAGS $TIMESTAMP"/UTS_VERSION="$TIMESTAMP"/g' scripts/mkcompile_h
+          # =================================================================
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
           chmod 777 ./*.so
           SO_DIR=$(pwd)
           
           # ================= 核心：时间注入逻辑 =================
+          export TZ='Asia/Shanghai'
           USER_TIME="${{ github.event.inputs.custom_build_time }}"
           if [[ -z "$USER_TIME" ]]; then
             # 留空则动态获取当前的东八区真实时间
-            TARGET_TIME="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S')"
-             TARGET_UNIX="$(TZ='UTC' date -d "$TARGET_TIME" +%s)"
+            TARGET_TIME="$(date +'%Y-%m-%d %H:%M:%S')"
+            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
             echo "--- 用户未指定编译时间，已自动获取当前系统真实时间: $TARGET_TIME ---"
           else
             TARGET_TIME="$USER_TIME"
-            TARGET_UNIX="$(TZ='UTC' date -d "$TARGET_TIME" +%s)"
+            # 2. 将用户输入的时间直接作为 CST 时间转换为时间戳
+            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
             echo "--- 用户指定了自定义编译时间: $TARGET_TIME ---"
           fi
           
