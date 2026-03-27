@@ -498,19 +498,20 @@ jobs:
           SO_DIR=$(pwd)
           
           # ================= 核心：时间注入逻辑 =================
-          export TZ='Asia/Shanghai'
+          #export TZ='Asia/Shanghai'
           USER_TIME="${{ github.event.inputs.custom_build_time }}"
           if [[ -z "$USER_TIME" ]]; then
             # 留空则动态获取当前的东八区真实时间
-            TARGET_TIME="$(date +'%Y-%m-%d %H:%M:%S')"
-            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
+            TARGET_TIME="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+            TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
             echo "--- 用户未指定编译时间，已自动获取当前系统真实时间: $TARGET_TIME ---"
           else
             TARGET_TIME="$USER_TIME"
             # 2. 将用户输入的时间直接作为 CST 时间转换为时间戳
-            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
+            TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
             echo "--- 用户指定了自定义编译时间: $TARGET_TIME ---"
           fi
+          EXACT_TIME_STR="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +'%a %b %d %H:%M:%S CST %Y')"
           
           export FAKESTAT="$TARGET_TIME"
           export FAKETIME="@$TARGET_TIME"
@@ -518,7 +519,10 @@ jobs:
           # 致命一击：强制覆盖 Linux 内核官方用于记录编译时间的环境变量！
           export KBUILD_BUILD_TIMESTAMP="$TARGET_TIME"
           export SOURCE_DATE_EPOCH="$TARGET_UNIX"
-          
+          # 2. 暴力美学：直接修改 mkcompile_h 脚本，无视系统一切规则！
+          # 我们直接找到脚本最后输出 UTS_VERSION 的那一句，强行替换为我们的 EXACT_TIME_STR。
+          # 这样直接连根拔起，既没有了 #1 SMP PREEMPT，也彻底无视了 Makefile 的 TZ=UTC。
+          sed -i "s/echo \\#define UTS_VERSION.*/echo \\#define UTS_VERSION \\\"$EXACT_TIME_STR\\\"/g" scripts/mkcompile_h
           # ======================================================
           
           # 测试全局劫持是否正常工作
