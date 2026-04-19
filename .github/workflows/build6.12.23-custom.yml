@@ -1,4 +1,4 @@
-name: 6.12.23 欧加真OKI内核快速构建
+name: 6.12.23 欧加真OKI内核快速构建-自定义时间
 
 env:
   TZ: Asia/Shanghai
@@ -615,7 +615,7 @@ jobs:
           sed -i 's/UTS_VERSION="$UTS_VERSION $CONFIG_FLAGS $TIMESTAMP"/UTS_VERSION="$TIMESTAMP"/g' scripts/mkcompile_h 2>/dev/null || true
           sed -i "s/UTS_VERSION/\\\"$EXACT_TIME_STR\\\"/g" init/version-timestamp.c init/version.c 2>/dev/null || true
           # ==============================================================================
-          
+
           SO_DIR=$(pwd)
           export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
           export REAL_CLANG_PATH="$WORKDIR/kernel_workspace/clang19/bin/clang"
