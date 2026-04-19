@@ -16,6 +16,14 @@ on:
         required: false
         type: string
         default: ''
+      build_timezone:
+        description: '内核编译时间时区 (选择 UTC 或 CST，应对不同系统版本的 uname 格式)'
+        required: true
+        type: choice
+        default: 'UTC'
+        options:
+          - 'UTC'
+          - 'CST'
       ksu_type:
         description: 'KernelSU分支(ReSukiSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认ReSukiSU)'
         required: true
@@ -588,45 +596,59 @@ jobs:
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
           chmod 777 ./*.so
-          # ================= 核心：时间注入逻辑 (已迁移自定义构建时间) =================
-          export TZ='Asia/Shanghai'
+          # ================= 核心：时间与时区注入逻辑 =================
+          # 1. 确定目标时区
+          if [[ "${{ github.event.inputs.build_timezone }}" == "CST" ]]; then
+            export TZ='Asia/Shanghai'
+          else
+            export TZ='UTC'
+          fi
+
+          # 2. 解析用户输入的时间
           USER_TIME="${{ github.event.inputs.custom_build_time }}"
           if [[ -z "$USER_TIME" ]]; then
-            TARGET_TIME="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
-            TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
-            echo "--- 用户未指定编译时间，已自动获取当前系统真实时间: $TARGET_TIME ---"
+            TARGET_TIME="$(date +'%Y-%m-%d %H:%M:%S')"
+            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
+            echo "--- 用户未指定编译时间，已自动获取当前系统真实时间 ($TZ): $TARGET_TIME ---"
           else
             TARGET_TIME="$USER_TIME"
-            TARGET_UNIX="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +%s)"
-            echo "--- 用户指定了自定义编译时间: $TARGET_TIME ---"
+            TARGET_UNIX="$(date -d "$TARGET_TIME" +%s)"
+            echo "--- 用户指定了自定义编译时间 ($TZ): $TARGET_TIME ---"
           fi
-          EXACT_TIME_STR="$(TZ='Asia/Shanghai' date -d "$TARGET_TIME" +'%a %b %d %H:%M:%S CST %Y')"
+          
+          # 3. 动态生成 uname 需要的时间字符串 (利用 %Z 自动对应 CST 或 UTC)
+          EXACT_TIME_STR="$(date -d "$TARGET_TIME" +'%a %b %d %H:%M:%S %Z %Y')"
           
           export FAKESTAT="$TARGET_TIME"
           export FAKETIME="@$TARGET_TIME"
           echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
           echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
+          echo "TZ=$TZ" >> $GITHUB_ENV
 
-          # 强制覆盖 Linux 内核官方用于记录编译时间的环境变量
+          # 4. 强制覆盖 Linux 内核官方用于记录编译时间的环境变量
           export KBUILD_BUILD_TIMESTAMP="$TARGET_TIME"
           export SOURCE_DATE_EPOCH="$TARGET_UNIX"
 
-          # 斩草除根：干掉 #1 SMP PREEMPT 并直接修改 mkcompile_h 和 version.c
+          # 5. 斩草除根：干掉 #1 SMP PREEMPT 并直接修改 mkcompile_h 和 version.c
           sed -i 's/UTS_VERSION="$UTS_VERSION $CONFIG_FLAGS $TIMESTAMP"/UTS_VERSION="$TIMESTAMP"/g' scripts/mkcompile_h 2>/dev/null || true
           sed -i "s/UTS_VERSION/\\\"$EXACT_TIME_STR\\\"/g" init/version-timestamp.c init/version.c 2>/dev/null || true
-          # ==============================================================================
+          # ==========================================================
 
           SO_DIR=$(pwd)
           export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
           export REAL_CLANG_PATH="$WORKDIR/kernel_workspace/clang19/bin/clang"
-          #创建 CC (编译器) 包装器
+          
+          # 创建 CC (编译器) 包装器 (重点：注入 TZ 环境变量保证 libfaketime 时区正确)
           echo '#!/bin/bash' > cc-wrapper
+          echo 'export TZ="'$TZ'"' >> cc-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
-          echo 'ccache $REAL_CLANG_PATH "$@"' >> cc-wrapper
-          #创建 LD (链接器) 包装器
+          echo "ccache ${REAL_CLANG_PATH} \"\$@\"" >> cc-wrapper
+          
+          # 创建 LD (链接器) 包装器
           echo '#!/bin/bash' > ld-wrapper
+          echo 'export TZ="'$TZ'"' >> ld-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
